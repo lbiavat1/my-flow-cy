@@ -24,6 +24,8 @@ if(!require("tidyverse"))
 
 library(tidyverse)
 
+install.packages("aws.signature", repos = c(cloudyr = "http://cloudyr.github.io/drat", getOption("repos")))
+
 BiocManager::install("CATALYST", dependencies = TRUE)
 
 library(CATALYST)
