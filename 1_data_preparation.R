@@ -69,6 +69,12 @@ as.matrix(names(cell.data))
 # make sample plot
 make.colour.plot(do.subsample(cell.data, 20000), "Comp-PE-A :: TCF1", "Comp-BV711-A :: CD127")
   
-  
-  
-  
+# add metadata and set parameters
+sample_details
+sample_info <- sample_details[, c("Filename", "Sample", "Timepoint", "Group", "Batch")]  
+sample_info  
+
+cell.data <- do.add.cols(cell.data, "FileName", sample_info, "Filename")
+
+# note: remove unwanted samples (limit analysis to baseline/exp vs non-exp)
+
