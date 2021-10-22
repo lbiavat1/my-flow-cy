@@ -8,6 +8,7 @@ Spectre::package.check()
 Spectre::package.load()
 
 library(tidyverse)
+library(purrr)
 
 ### Set PrimaryDirectory
 dirname(rstudioapi::getActiveDocumentContext()$path)            # Finds the directory where this script is located
@@ -33,9 +34,9 @@ MetaDirectory <- getwd()
 setwd(PrimaryDirectory)
 
 ### Create output directory
-if(!dir.exists("Output"))
-  dir.create("Output", showWarnings = FALSE)
-setwd("Output")
+if(!dir.exists("output"))
+  dir.create("output", showWarnings = FALSE)
+setwd("output")
 OutputDirectory <- getwd()
 setwd(PrimaryDirectory)
 
@@ -52,10 +53,22 @@ cell.data <- do.merge.files(data.list)
 # prep and read in metadata
 
 Filename <- list.files(InputDirectory)
-# write_csv(as.data.frame(Filename), file = paste(MetaDirectory, "sample.details.csv", sep = "/"))
+# # write_csv(as.data.frame(Filename), file = paste(MetaDirectory, "sample.details.csv", sep = "/"))
+# metadata_file <- paste(MetaDirectory, "sample.details.csv", sep = "/")
+# sample_details <- read_csv(metadata_file)
+# #add cells per sample
+# sample_details$`Cells per sample` <- map_dbl(data.list, nrow)
+# sample_details
+# write_csv(sample_details, file = metadata_file)
+
 metadata_file <- paste(MetaDirectory, "sample.details.csv", sep = "/")
 sample_details <- read_csv(metadata_file)
 
+as.matrix(names(cell.data))
 
-
-
+# make sample plot
+make.colour.plot(do.subsample(cell.data, 20000), "Comp-PE-A :: TCF1", "Comp-BV711-A :: CD127")
+  
+  
+  
+  
