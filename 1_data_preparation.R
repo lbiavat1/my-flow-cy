@@ -68,6 +68,8 @@ check$name.table
 # merge data
 cell.data <- do.merge.files(data.list)
 
+file.names <- gsub(".csv", "", samples_to_keep$Filename)
+data <- cell.data %>% dplyr::filter(FileName %in% file.names)
 
 as.matrix(names(cell.data))
 
