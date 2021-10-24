@@ -40,15 +40,6 @@ setwd("output")
 OutputDirectory <- getwd()
 setwd(PrimaryDirectory)
 
-# import data
-list.files(InputDirectory)
-data.list <- Spectre::read.files(file.loc = InputDirectory, file.type = ".csv", 
-                                 do.embed.file.names = TRUE)
-check <- do.list.summary(data.list)
-check$name.table
-
-# merge data
-cell.data <- do.merge.files(data.list)
 
 # prep and read in metadata
 
@@ -63,6 +54,20 @@ Filename <- list.files(InputDirectory)
 
 metadata_file <- paste(MetaDirectory, "sample.details.csv", sep = "/")
 sample_details <- read_csv(metadata_file)
+sample_details
+# keep only baseline sample
+samples_to_keep <- sample_details %>% dplyr::filter(Timepoint == "Baseline")
+
+# import data
+list.files(InputDirectory)
+data.list <- Spectre::read.files(file.loc = InputDirectory, file.type = ".csv", 
+                                 do.embed.file.names = TRUE, header = TRUE)
+check <- do.list.summary(data.list)
+check$name.table
+# subset only baseline samples
+# merge data
+cell.data <- do.merge.files(data.list)
+
 
 as.matrix(names(cell.data))
 
@@ -77,4 +82,5 @@ sample_info
 cell.data <- do.add.cols(cell.data, "FileName", sample_info, "Filename")
 
 # note: remove unwanted samples (limit analysis to baseline/exp vs non-exp)
+# select only samples from Baseline, exp vs not_exp - remove HD
 
