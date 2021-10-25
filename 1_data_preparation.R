@@ -68,6 +68,8 @@ check$name.table
 # merge data
 cell.data <- do.merge.files(data.list)
 
+# note: remove unwanted samples (limit analysis to baseline/exp vs non-exp)
+# select only samples from Baseline, exp vs not_exp - remove HD
 file.names <- gsub(".csv", "", samples_to_keep$Filename)
 data <- cell.data %>% dplyr::filter(FileName %in% file.names)
 
@@ -77,12 +79,46 @@ as.matrix(names(cell.data))
 make.colour.plot(do.subsample(cell.data, 20000), "Comp-PE-A :: TCF1", "Comp-BV711-A :: CD127")
   
 # add metadata and set parameters
-sample_details
-sample_info <- sample_details[, c("Filename", "Sample", "Timepoint", "Group", "Batch")]  
-sample_info  
+sample.info <- sample_details %>% select("Filename", "Group")
 
-cell.data <- do.add.cols(cell.data, "FileName", sample_info, "Filename")
+cell.data <- do.add.cols(data, "FileName", sample.info, "Filename", rmv.ext = TRUE)
+class(cell.data)
+cell.data
 
-# note: remove unwanted samples (limit analysis to baseline/exp vs non-exp)
-# select only samples from Baseline, exp vs not_exp - remove HD
+as.matrix(names(cell.data))
+# select relevant markers - if needed, subset state vs type markers here
+type.markers <- names(cell.data)[c(11, 13:32)]
+type.markers
+
+# select markers used for clustering/DR
+cluster.markers <- type.markers
+
+# specify sample, group, and batch columns
+exp.name <- "J1484 - aMILs expansion"
+sample.col <- "Sample"
+group.col <- "Group"
+batch.col <- "Batch"
+
+data.frame(table(cell.data[[group.col]]))
+
+unique(cell.data[[group.col]])
+
+# Clustering and DR
+
+setwd(OutputDirectory)
+if(!dir.exists("output-clustering"))
+  dir.create("output-clustering")
+clustering.dir <- "output-clustering"
+setwd(clustering.dir)
+
+# run flowsom
+cell.data <- run.flowsom(cell.data, cluster.markers, meta.k = 12)
+
+# dimrnsionality reduction - DR
+unique(cell.data[[group.col]])
+subsampling.targets <- c(3000, 3000)
+cell.sub <- do.subsample(cell.data, subsampling.targets, group.col)
+
+
+
 
