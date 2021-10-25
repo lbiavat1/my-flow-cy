@@ -76,7 +76,7 @@ data <- cell.data %>% dplyr::filter(FileName %in% file.names)
 as.matrix(names(cell.data))
 
 # make sample plot
-make.colour.plot(do.subsample(cell.data, 20000), "Comp-PE-A :: TCF1", "Comp-BV711-A :: CD127")
+# make.colour.plot(do.subsample(cell.data, 20000), "Comp-PE-A :: TCF1", "Comp-BV711-A :: CD127")
   
 # add metadata and set parameters
 sample.info <- sample_details %>% select("Filename", "Group")
@@ -113,12 +113,28 @@ setwd(clustering.dir)
 
 # run flowsom
 cell.data <- run.flowsom(cell.data, cluster.markers, meta.k = 12)
+cell.data
 
 # dimrnsionality reduction - DR
 unique(cell.data[[group.col]])
 subsampling.targets <- c(3000, 3000)
 cell.sub <- do.subsample(cell.data, subsampling.targets, group.col)
 
+cell.sub <- run.umap(cell.sub, cluster.markers)
+cell.sub
 
+make.colour.plot(cell.sub, x.axis = "UMAP_X", y.axis = "UMAP_Y", col.axis = "FlowSOM_metacluster", 
+                 col.type = "factor", add.label = TRUE)
 
+make.multi.plot(cell.sub, "UMAP_X", "UMAP_Y", "FlowSOM_metacluster", col.type = 'factor',
+                divide.by = group.col, add.density = TRUE)
 
+RColorBrewer::display.brewer.all()
+
+ggplot(cell.sub, aes(x = UMAP_X, y = UMAP_Y, col = as.factor(FlowSOM_metacluster))) +
+  geom_point() +
+  facet_wrap(~ Group) +
+  theme_bw()
+
+setwd(PrimaryDirectory)
+saveRDS(ls(), file = "mainRDS.rds")
