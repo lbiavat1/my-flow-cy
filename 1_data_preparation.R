@@ -117,7 +117,7 @@ cell.data
 
 # dimrnsionality reduction - DR
 unique(cell.data[[group.col]])
-subsampling.targets <- c(3000, 3000)
+subsampling.targets <- c(10000, 10000)
 cell.sub <- do.subsample(cell.data, subsampling.targets, group.col)
 
 cell.sub <- run.umap(cell.sub, cluster.markers)
@@ -132,9 +132,26 @@ make.multi.plot(cell.sub, "UMAP_X", "UMAP_Y", "FlowSOM_metacluster", col.type = 
 RColorBrewer::display.brewer.all()
 
 ggplot(cell.sub, aes(x = UMAP_X, y = UMAP_Y, col = as.factor(FlowSOM_metacluster))) +
-  geom_point() +
+  geom_point(size = 0.1) +
   facet_wrap(~ Group) +
   theme_bw()
+
+exp <- do.aggregate(cell.data, type.markers, by = "FlowSOM_metacluster")
+make.pheatmap(exp, "FlowSOM_metacluster", cluster.markers)
+
+# stats
+
+variance.test <- 'kruskal.test'
+pairwise.test <- 'wilcox.test'
+as.matrix(unique(cell.data[[group.col]]))
+
+comparisons <- list(c("exp", "not_exp"))
+grp.order <- c("exp", "not_exp")
+
+# notes
+# create SCE using CATALYST::prepData -> run miloR (may take forever)
+# create SCE from data.table -> run miloR -> convert SCE to data.table
+
 
 setwd(PrimaryDirectory)
 saveRDS(ls(), file = "mainRDS.rds")
