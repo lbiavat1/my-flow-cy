@@ -9,6 +9,8 @@ Spectre::package.load()
 
 library(tidyverse)
 library(purrr)
+library(CATALYST)
+library(tidySingleCellExperiment)
 
 ### Set PrimaryDirectory
 dirname(rstudioapi::getActiveDocumentContext()$path)            # Finds the directory where this script is located
@@ -23,6 +25,10 @@ if(!dir.exists("data"))
   dir.create("data")
 setwd("data/")
 InputDirectory <- getwd()
+if(!dir.exists("fcs"))
+    dir.create("fcs")
+setwd("fcs/")
+fcsDir <- getwd()
 setwd(PrimaryDirectory)
 
 ### Set 'metadata' directory
@@ -44,6 +50,7 @@ setwd(PrimaryDirectory)
 # prep and read in metadata
 
 Filename <- list.files(InputDirectory)
+
 # # write_csv(as.data.frame(Filename), file = paste(MetaDirectory, "sample.details.csv", sep = "/"))
 # metadata_file <- paste(MetaDirectory, "sample.details.csv", sep = "/")
 # sample_details <- read_csv(metadata_file)
@@ -57,6 +64,57 @@ sample_details <- read_csv(metadata_file)
 sample_details
 # keep only baseline sample
 samples_to_keep <- sample_details %>% dplyr::filter(Timepoint == "Baseline")
+
+
+# prepData for CATALYST - create SCE
+CSVfiles <- samples_to_keep$Filename
+
+csvTofcs <- function(file.names, dest){
+  # create an empty list to start
+  DataList <- list() 
+  
+  for(file in file.names){
+    tmp <- read_csv(file.path(file))
+    file <- gsub(".csv", "", file)
+    DataList[[file]] <- tmp
+  }
+  rm(tmp)
+  
+  filenames <- names(DataList)
+  head(DataList)
+  
+  # convert csv to fcs
+  
+  for(i in c(1:length(filenames))){
+    data_subset <- DataList[i]
+    data_subset <- data.table::rbindlist(as.list(data_subset))
+    file_name <- names(DataList)[i]
+    
+    metadata <- data.frame(name = dimnames(data_subset)[[2]], desc = "")
+    
+    # create FCS file metadata
+    # metadata$range <- apply(apply(data_subset, 2, range), 2, diff)
+    metadata$minRange <- apply(data_subset, 2, min)
+    metadata$maxRange <- apply(data_subset, 2, max)
+    
+    
+    # data as matrix by exprs
+    data_subset.ff <- new("flowFrame", exprs = as.matrix(data_subset),
+                          parameters = AnnotatedDataFrame(metadata))
+    
+    head(data_subset.ff)
+    write.FCS(data_subset.ff, paste0(dest, "/", file_name, ".fcs"), what = "numeric")
+  }
+}
+setwd(InputDirectory)
+csvTofcs(CSVfiles, fcsDir)
+
+
+
+
+
+
+
 
 # import data
 list.files(InputDirectory)

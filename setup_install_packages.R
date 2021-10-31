@@ -29,3 +29,6 @@ install.packages("aws.signature", repos = c(cloudyr = "http://cloudyr.github.io/
 BiocManager::install("CATALYST", dependencies = TRUE)
 
 library(CATALYST)
+
+BiocManager::install("tidySingleCellExperiment")
+library(tidySingleCellExperiment)
