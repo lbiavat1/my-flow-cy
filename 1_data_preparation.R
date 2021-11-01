@@ -11,6 +11,8 @@ library(tidyverse)
 library(purrr)
 library(CATALYST)
 library(tidySingleCellExperiment)
+library(flowCore)
+library(stringr)
 
 ### Set PrimaryDirectory
 dirname(rstudioapi::getActiveDocumentContext()$path)            # Finds the directory where this script is located
@@ -69,6 +71,7 @@ samples_to_keep <- sample_details %>% dplyr::filter(Timepoint == "Baseline")
 # prepData for CATALYST - create SCE
 CSVfiles <- samples_to_keep$Filename
 
+# convert csv files to fcs
 csvTofcs <- function(file.names, dest){
   # create an empty list to start
   DataList <- list() 
@@ -108,12 +111,45 @@ csvTofcs <- function(file.names, dest){
 }
 setwd(InputDirectory)
 csvTofcs(CSVfiles, fcsDir)
+fcsFiles <- list.files(path = fcsDir, pattern = ".fcs")
+# read fcs files as flowSet and add $CYT keyword
+fs <- read.flowSet(files = fcsFiles, path = fcsDir, truncate_max_range = FALSE)
 
+fs
+fs[[1]]@description$`$CYT` <- "FACS"
 
+# create tibble sample_md
+sample_md <- samples_to_keep %>% select(Filename, Sample, Timepoint, Group) %>%
+  mutate(Filename = gsub(".csv", "", Filename)) %>%
+  mutate(file_name = paste0(Filename, ".fcs")) %>%
+  mutate(patient_id = Sample) %>%
+  mutate(condition = Group) %>%
+  mutate(sample_id = paste(Sample, Timepoint, sep = "_")) %>%
+  select(file_name, patient_id, condition, sample_id) %>%
+  as.data.frame()
 
+# create tibble panel_md
+fcs_colname <- colnames(fs)
+fcs_colname
+antigen <- fcs_colname
+antigen[10:35] <- sapply(fcs_colname[10:35], function(.) unlist(str_split(., " :: "))[2])
+fluorochrome <- fcs_colname
+fluorochrome[10:35] <- sapply(fcs_colname[10:35], function(.) unlist(str_split(., " :: "))[1])
+marker_class <- fcs_colname
+marker_class[ c(1:10, 12, 33:36)] <- "none"
+marker_class[c(11, 13:32)] <- "type"
+panel_md <- as_tibble(cbind(fcs_colname, antigen, fluorochrome, marker_class))
+as.data.frame(panel_md)
 
+# use CATALYST::prepData() to create SCE object from flowSet
+sce <- prepData(fs, panel_md, sample_md)
+assay(sce, "exprs") <- assay(sce, "counts")
 
+tidy_sce <- tidySingleCellExperiment::tidy(sce)
 
+pbMDS(sce, by = "sample_id")
+
+spectre_sce <- create.dt(sce)
 
 
 # import data
