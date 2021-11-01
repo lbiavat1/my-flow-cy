@@ -32,3 +32,6 @@ library(CATALYST)
 
 BiocManager::install("tidySingleCellExperiment")
 library(tidySingleCellExperiment)
+
+BiocManager::install("miloR")
+library(miloR)

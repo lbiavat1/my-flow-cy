@@ -13,6 +13,7 @@ library(CATALYST)
 library(tidySingleCellExperiment)
 library(flowCore)
 library(stringr)
+library(miloR)
 
 ### Set PrimaryDirectory
 dirname(rstudioapi::getActiveDocumentContext()$path)            # Finds the directory where this script is located
@@ -148,6 +149,8 @@ assay(sce, "exprs") <- assay(sce, "counts")
 tidy_sce <- tidySingleCellExperiment::tidy(sce)
 
 pbMDS(sce, by = "sample_id")
+sce <- runDR(sce, dr = "PCA", features = "type")
+plotDR(sce, dr = "PCA", color_by = "condition")
 
 spectre_sce <- create.dt(sce)
 
