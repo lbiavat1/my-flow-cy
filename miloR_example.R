@@ -83,6 +83,8 @@ nh_graph_plot <- plotNhoodGraphDA(sce_milo, da_results, layout = "umap", alpha =
 umap_plot + nh_graph_plot +
   plot_layout(guides = "collect")
 
+nh_graph_plot
+
 da_results <- annotateNhoods(sce_milo, da_results, coldata_col = "celltype")
 head(da_results)
 
