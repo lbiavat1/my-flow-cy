@@ -151,6 +151,60 @@ as.data.frame(panel_md)
 sce <- prepData(fs, panel_md, sample_md)
 assay(sce, "exprs") <- assay(sce, "counts")
 
+seed <- 123456
+set.seed(seed)
+sce <- cluster(sce, features = "type", xdim = 10, ydim = 10, maxK = 20, 
+               verbose = TRUE, seed = seed)
+delta_area(sce)
+# Run dimensionality reduction
+n_cells <- 1000
+n_events <- min(n_cells(sce))
+ifelse(n_cells > n_events, n_cells <- n_events, n_cells <- n_cells)
+exaggeration_factor <- 12.0
+eta <- n_cells/exaggeration_factor
+sce <- runDR(sce, dr =  "UMAP", cells = n_cells, features = "type")
+
+plotAbundances(sce, k = "meta8", by = "cluster_id", group_by = "condition")
+plotDR(sce, dr = "UMAP", color_by = "meta8", facet_by = "condition") +  
+  geom_density2d(binwidth = 0.006, colour = "black")
+
+# annotate clusters
+
+annotation_table <- as.data.frame(cbind(c(1:8), c(1:8)))
+
+colnames(annotation_table) <- c("meta8", "Clusters")
+annotation_table$Clusters <- factor(annotation_table$Clusters)
+sce <- mergeClusters(sce, k = "meta8", 
+                     table = annotation_table, id = "cluster_annotation", overwrite = TRUE)
+sce$cluster_annotation <- cluster_ids(sce, "cluster_annotation")
+# filtered_sce <- filterSCE(sce, cluster_id %in% c(paste0("C", c(1:12))), k = "cluster_annotation")
+
+# store original_sce
+# old_sce <- sce
+# sce <- filtered_sce
+
+FDR_cutoff <- 0.05
+ei <- sce@metadata$experiment_info
+plotAbundances(sce, k = "cluster_annotation", by = "cluster_id", group_by = "condition")
+
+# DA using edgeR
+design <- createDesignMatrix(ei,
+                             cols_design = c("condition"))
+contrast <- createContrast(c(0, 1))
+
+
+nrow(contrast) == ncol(design)
+
+out_DA <- diffcyt(sce,
+                  experiment_info = ei, design = design, contrast = contrast,
+                  analysis_type = "DA", method_DA = "diffcyt-DA-edgeR",
+                  clustering_to_use = "cluster_annotation", verbose = TRUE, subsampling = TRUE,
+                  transform = FALSE, normalize = FALSE)
+
+da <- rowData(out_DA$res)
+plotDiffHeatmap(sce, da, top_n = 8, all = TRUE, fdr = FDR_cutoff)
+
+
 # p <- plotExprs(sce, features = NULL, color_by = "condition")
 # p$facet$params$ncol <- 9
 # p
@@ -175,9 +229,25 @@ subsampleSCE <- function(x, n_cells){
 
 cells <- min(c(3000, n_events))
 sub.sce <- subsampleSCE(sce, cells)
+
+
+# simple function: x -SCE, n_cells -#cells per condition
+subsampleSCE_condition <- function(x, n_cells){
+  cs <- split(seq_len(ncol(x)), x$condition)
+  cs <- unlist(lapply(cs, function(.) sample(., min(n_cells, length(.)))))
+  x <- x[, cs]
+  return(x)
+}
+
+sub.sce <- subsampleSCE_condition(sce, 15000)
+
 logcounts(sub.sce) <- log(counts(sub.sce) + 1)
 
-sub.sce <- runPCA(sub.sce, ncomponents = 30)
+sub.sce <- runPCA(sub.sce, ncomponents = 15)
+percent.var <- attr(reducedDim(sub.sce), "percentVar")
+
+plot(percent.var, log = "y", xlab = "PC", ylab = "Variance explained (%)")
+
 sub.sce <- runUMAP(sub.sce, dimred = "PCA", name = "umap")
 
 plotReducedDim(sub.sce, colour_by = "condition", dimred = "umap")
@@ -186,11 +256,11 @@ sce_milo <- Milo(sub.sce)
 sce_milo
 
 # construct kNN graph
-sce_milo <- buildGraph(sce_milo, k = 30, d = 30, reduced.dim = "PCA")
+sce_milo <- buildGraph(sce_milo, k = 30, d = 10, reduced.dim = "PCA")
 sce_milo
 
 # defining representative nhoods on the kNN graph
-sce_milo <- makeNhoods(sce_milo, prop = 0.1, k = 30, d = 30, refined = TRUE, 
+sce_milo <- makeNhoods(sce_milo, prop = 0.1, k = 30, d = 15, refined = TRUE, 
                        reduced_dims = "PCA")
 plotNhoodSizeHist(sce_milo)
 
@@ -199,7 +269,7 @@ sce_milo <- countCells(sce_milo, meta.data = data.frame(colData(sce_milo)), samp
 head(nhoodCounts(sce_milo))
 
 # defining experimental design
-sce_design <- data.frame(colData(sce_milo))[,c("sample_id", "condition")]
+sce_design <- data.frame(colData(sce_milo))[, c("sample_id", "condition")]
 ## Convert batch info from integer to factor
 sce_design$condition <- as.factor(sce_design$condition)
 sce_design <- distinct(sce_design)
@@ -207,7 +277,7 @@ rownames(sce_design) <- sce_design$sample_id
 sce_design
 
 # computing nhood connectivity
-sce_milo <- calcNhoodDistance(sce_milo, d = 30, reduced.dim = "PCA")
+sce_milo <- calcNhoodDistance(sce_milo, d = 15, reduced.dim = "PCA")
 sce_milo
 
 # testing
@@ -247,20 +317,12 @@ plotDAbeeswarm(da_results, group.by = "condition")
 
 sce_milo <- logNormCounts(sce_milo)
 
-# da_results$NhoodGroup <- as.numeric(da_results$SpatialFDR < 0.1 & da_results$logFC < 0)
-# as_tibble(da_results)
-# da_nhood_markers <- findNhoodGroupMarkers(sce_milo, da_results, 
-#                                           subset.row = rownames(sce_milo)[c(11,13:32)],
-#                                           aggregate.samples = TRUE, sample_col = "sample_id")
+da_results$NhoodGroup <- as.numeric(da_results$SpatialFDR < 0.1 & da_results$logFC < 0)
+as_tibble(da_results)
 
-## Run buildNhoodGraph to store nhood adjacency matrix
-sce_milo <- buildNhoodGraph(sce_milo)
 
-## Find groups
-da_results <- groupNhoods(sce_milo, da_results, max.lfc.delta = 2)
-head(da_results)
 
-plotNhoodGroups(sce_milo, da_results, layout="umap")
-plotDAbeeswarm(da_results, "NhoodGroup")
+
+
 
 
