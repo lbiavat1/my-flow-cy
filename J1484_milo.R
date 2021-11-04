@@ -216,6 +216,10 @@ plotCounts(sce, group_by = "sample_id", color_by = "condition")
 
 plotNRS(sce, features = type_markers(sce), color_by = "condition")
 
+# re-create sce
+sce <- prepData(fs, panel_md, sample_md)
+assay(sce, "exprs") <- assay(sce, "counts")
+
 
 ######### prep to run miloR - subsample SCE per sample_id ######################
 
@@ -239,14 +243,32 @@ subsampleSCE_condition <- function(x, n_cells){
   return(x)
 }
 
-sub.sce <- subsampleSCE_condition(sce, 15000)
+sub.sce <- subsampleSCE_condition(sce, 20000)
 
+# std.sce <- sub.sce
+# seed <- 123456
+# set.seed(seed)
+# std.sce <- cluster(std.sce, features = "type", xdim = 10, ydim = 10, maxK = 20, 
+#                verbose = TRUE, seed = seed)
+# delta_area(std.sce)
+# # Run dimensionality reduction
+# 
+# std.sce <- runDR(std.sce, dr =  "UMAP", features = "type")
+# 
+# plotAbundances(std.sce, k = "meta8", by = "cluster_id", group_by = "condition")
+# plotDR(std.sce, dr = "UMAP", color_by = "meta8", facet_by = "condition") +  
+#   geom_density2d(binwidth = 0.006, colour = "black")
+# 
+# plotExprHeatmap(std.sce, features = type_markers(sce), k = "meta8", 
+#                 by = "cluster_id", scale = "last", bars = TRUE, perc = TRUE)
+# 
+# 
 logcounts(sub.sce) <- log(counts(sub.sce) + 1)
 
 sub.sce <- runPCA(sub.sce, ncomponents = 15)
 percent.var <- attr(reducedDim(sub.sce), "percentVar")
-
 plot(percent.var, log = "y", xlab = "PC", ylab = "Variance explained (%)")
+plotReducedDim(sub.sce, colour_by = "condition", dimred = "PCA")
 
 sub.sce <- runUMAP(sub.sce, dimred = "PCA", name = "umap")
 
@@ -256,7 +278,7 @@ sce_milo <- Milo(sub.sce)
 sce_milo
 
 # construct kNN graph
-sce_milo <- buildGraph(sce_milo, k = 30, d = 10, reduced.dim = "PCA")
+sce_milo <- buildGraph(sce_milo, k = 30, d = 15, reduced.dim = "PCA")
 sce_milo
 
 # defining representative nhoods on the kNN graph
