@@ -256,7 +256,7 @@ sub.sce <- subsampleSCE_condition(sce, 20000)
 # std.sce <- runDR(std.sce, dr =  "UMAP", features = "type")
 # 
 # plotAbundances(std.sce, k = "meta8", by = "cluster_id", group_by = "condition")
-# plotDR(std.sce, dr = "UMAP", color_by = "meta8", facet_by = "condition") +  
+# plotDR(std.sce, dr = "UMAP", color_by = "meta8", facet_by = "condition") +
 #   geom_density2d(binwidth = 0.006, colour = "black")
 # 
 # plotExprHeatmap(std.sce, features = type_markers(sce), k = "meta8", 
