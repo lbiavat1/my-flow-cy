@@ -14,6 +14,8 @@ library(tidySingleCellExperiment)
 library(flowCore)
 library(stringr)
 library(scater)
+library(scran)
+
 
 library(miloR)
 library(patchwork)
@@ -69,7 +71,8 @@ metadata_file <- paste(MetaDirectory, "sample.details.csv", sep = "/")
 sample_details <- read_csv(metadata_file)
 sample_details
 # keep only baseline sample
-samples_to_keep <- sample_details %>% dplyr::filter(Timepoint == "Baseline")
+samples_to_keep <- sample_details %>% dplyr::filter(Timepoint == "Baseline") %>%
+  dplyr::filter(!grepl("no_harvest", Group))
 
 
 # prepData for CATALYST - create SCE
@@ -148,78 +151,77 @@ panel_md <- as_tibble(cbind(fcs_colname, antigen, fluorochrome, marker_class))
 as.data.frame(panel_md)
 
 ######### prepData - create SCE using CATALYST #################################
+######################## old algorithm #########################################
+# sce <- prepData(fs, panel_md, sample_md)
+# assay(sce, "exprs") <- assay(sce, "counts")
+# 
+# seed <- 123456
+# set.seed(seed)
+# sce <- cluster(sce, features = "type", xdim = 10, ydim = 10, maxK = 20, 
+#                verbose = TRUE, seed = seed)
+# delta_area(sce)
+# # Run dimensionality reduction
+# n_cells <- 1000
+# n_events <- min(n_cells(sce))
+# ifelse(n_cells > n_events, n_cells <- n_events, n_cells <- n_cells)
+# exaggeration_factor <- 12.0
+# eta <- n_cells/exaggeration_factor
+# sce <- runDR(sce, dr =  "UMAP", cells = n_cells, features = "type")
+# 
+# plotAbundances(sce, k = "meta8", by = "cluster_id", group_by = "condition")
+# plotDR(sce, dr = "UMAP", color_by = "meta8", facet_by = "condition") +  
+#   geom_density2d(binwidth = 0.006, colour = "black")
+# 
+# # annotate clusters
+# 
+# annotation_table <- as.data.frame(cbind(c(1:8), c(1:8)))
+# 
+# colnames(annotation_table) <- c("meta8", "Clusters")
+# annotation_table$Clusters <- factor(annotation_table$Clusters)
+# sce <- mergeClusters(sce, k = "meta8", 
+#                      table = annotation_table, id = "cluster_annotation", overwrite = TRUE)
+# sce$cluster_annotation <- cluster_ids(sce, "cluster_annotation")
+# # filtered_sce <- filterSCE(sce, cluster_id %in% c(paste0("C", c(1:12))), k = "cluster_annotation")
+# 
+# # store original_sce
+# # old_sce <- sce
+# # sce <- filtered_sce
+# 
+# FDR_cutoff <- 0.05
+# ei <- sce@metadata$experiment_info
+# plotAbundances(sce, k = "cluster_annotation", by = "cluster_id", group_by = "condition")
+# 
+# # DA using edgeR
+# design <- createDesignMatrix(ei,
+#                              cols_design = c("condition"))
+# contrast <- createContrast(c(0, 1))
+# 
+# 
+# nrow(contrast) == ncol(design)
+# 
+# out_DA <- diffcyt(sce,
+#                   experiment_info = ei, design = design, contrast = contrast,
+#                   analysis_type = "DA", method_DA = "diffcyt-DA-edgeR",
+#                   clustering_to_use = "cluster_annotation", verbose = TRUE, subsampling = TRUE,
+#                   transform = FALSE, normalize = FALSE)
+# 
+# da <- rowData(out_DA$res)
+# plotDiffHeatmap(sce, da, top_n = 8, all = TRUE, fdr = FDR_cutoff)
+# 
+# 
+# # p <- plotExprs(sce, features = NULL, color_by = "condition")
+# # p$facet$params$ncol <- 9
+# # p
+
+
+################### SCE for milo ###############################################
 sce <- prepData(fs, panel_md, sample_md)
 assay(sce, "exprs") <- assay(sce, "counts")
-
-seed <- 123456
-set.seed(seed)
-sce <- cluster(sce, features = "type", xdim = 10, ydim = 10, maxK = 20, 
-               verbose = TRUE, seed = seed)
-delta_area(sce)
-# Run dimensionality reduction
-n_cells <- 1000
-n_events <- min(n_cells(sce))
-ifelse(n_cells > n_events, n_cells <- n_events, n_cells <- n_cells)
-exaggeration_factor <- 12.0
-eta <- n_cells/exaggeration_factor
-sce <- runDR(sce, dr =  "UMAP", cells = n_cells, features = "type")
-
-plotAbundances(sce, k = "meta8", by = "cluster_id", group_by = "condition")
-plotDR(sce, dr = "UMAP", color_by = "meta8", facet_by = "condition") +  
-  geom_density2d(binwidth = 0.006, colour = "black")
-
-# annotate clusters
-
-annotation_table <- as.data.frame(cbind(c(1:8), c(1:8)))
-
-colnames(annotation_table) <- c("meta8", "Clusters")
-annotation_table$Clusters <- factor(annotation_table$Clusters)
-sce <- mergeClusters(sce, k = "meta8", 
-                     table = annotation_table, id = "cluster_annotation", overwrite = TRUE)
-sce$cluster_annotation <- cluster_ids(sce, "cluster_annotation")
-# filtered_sce <- filterSCE(sce, cluster_id %in% c(paste0("C", c(1:12))), k = "cluster_annotation")
-
-# store original_sce
-# old_sce <- sce
-# sce <- filtered_sce
-
-FDR_cutoff <- 0.05
-ei <- sce@metadata$experiment_info
-plotAbundances(sce, k = "cluster_annotation", by = "cluster_id", group_by = "condition")
-
-# DA using edgeR
-design <- createDesignMatrix(ei,
-                             cols_design = c("condition"))
-contrast <- createContrast(c(0, 1))
-
-
-nrow(contrast) == ncol(design)
-
-out_DA <- diffcyt(sce,
-                  experiment_info = ei, design = design, contrast = contrast,
-                  analysis_type = "DA", method_DA = "diffcyt-DA-edgeR",
-                  clustering_to_use = "cluster_annotation", verbose = TRUE, subsampling = TRUE,
-                  transform = FALSE, normalize = FALSE)
-
-da <- rowData(out_DA$res)
-plotDiffHeatmap(sce, da, top_n = 8, all = TRUE, fdr = FDR_cutoff)
-
-
-# p <- plotExprs(sce, features = NULL, color_by = "condition")
-# p$facet$params$ncol <- 9
-# p
 
 n_events <- min(n_cells(sce))
 n_events
 n_cells(sce)
 plotCounts(sce, group_by = "sample_id", color_by = "condition")
-
-plotNRS(sce, features = type_markers(sce), color_by = "condition")
-
-# re-create sce
-sce <- prepData(fs, panel_md, sample_md)
-assay(sce, "exprs") <- assay(sce, "counts")
-
 
 ######### prep to run miloR - subsample SCE per sample_id ######################
 
@@ -234,16 +236,6 @@ subsampleSCE <- function(x, n_cells){
 cells <- min(c(3000, n_events))
 sub.sce <- subsampleSCE(sce, cells)
 
-
-# simple function: x -SCE, n_cells -#cells per condition
-subsampleSCE_condition <- function(x, n_cells){
-  cs <- split(seq_len(ncol(x)), x$condition)
-  cs <- unlist(lapply(cs, function(.) sample(., min(n_cells, length(.)))))
-  x <- x[, cs]
-  return(x)
-}
-
-sub.sce <- subsampleSCE_condition(sce, 20000)
 
 # std.sce <- sub.sce
 # seed <- 123456
@@ -330,18 +322,67 @@ umap_plot + nh_graph_plot +
 setwd(OutputDirectory)
 ggsave("miloPlot.pdf")
 
+
+# assign a "condition" label to each nhood by finding the most abundant "condition" within cells in each neighbourhood. 
 da_results <- annotateNhoods(sce_milo, da_results, coldata_col = "condition")
 head(da_results)
+ggplot(da_results, aes(condition_fraction)) +
+  geom_histogram(bins=50)
 
+# define a threshold for condition_fraction to exclude nhoods that are a mix of cell types.
 da_results$condition <- ifelse(da_results$condition_fraction < 0.7, "Mixed", da_results$condition)
 
 plotDAbeeswarm(da_results, group.by = "condition")
 
+# add log-normalized counts to milo object
 sce_milo <- logNormCounts(sce_milo)
 
-da_results$NhoodGroup <- as.numeric(da_results$SpatialFDR < 0.1 & da_results$logFC < 0)
+da_results <- groupNhoods(sce_milo, da.res = da_results, da.fdr = 0.1, max.lfc.delta = 2)
 as_tibble(da_results)
 
+
+type.markers <- rownames(sce_milo)[c(11, 13:32)]
+cellID <- sce_milo %>% select(cell)
+colnames(sce_milo) <- c(1:69000)
+da_nhood_markers <- findNhoodGroupMarkers(sce_milo, da_results, subset.row = type.markers)
+
+plotNhoodGroups(sce_milo, da_results, layout = "umap")
+plotDAbeeswarm(da_results, group.by = "NhoodGroup")
+
+plotDAbeeswarm(groupNhoods(sce_milo, da_results, max.lfc.delta = 1),
+               group.by = "NhoodGroup") + 
+  ggtitle("max LFC delta = 1")
+
+plotDAbeeswarm(groupNhoods(sce_milo, da_results, da.fdr = 0.1, max.lfc.delta = 2, overlap = 1), 
+               group.by = "NhoodGroup") + ggtitle("overlap = 1")
+
+## Exclude zero counts genes
+keep.rows <- rowSums(logcounts(sce_milo)) != 0
+sce_milo <- sce_milo[keep.rows, ]
+
+## Find HVGs
+dec <- modelGeneVar(sce_milo, subset.row = type.markers)
+hvgs <- getTopHVGs(dec, n = NULL)
+head(hvgs)
+
+nhood_markers <- findNhoodGroupMarkers(sce_milo, da_results, subset.row = hvgs)
+
+head(nhood_markers)
+
+gr11_markers <- nhood_markers[c("logFC_11", "adj.P.Val_11")] 
+colnames(gr11_markers) <- c("logFC", "adj.P.Val")
+
+head(gr11_markers[order(gr11_markers$adj.P.Val), ])
+
+markers <- rownames(nhood_markers)[nhood_markers$adj.P.Val_11 < 0.01 & nhood_markers$logFC_11 > 0]
+
+plotNhoodExpressionGroups(sce_milo, da_results, features = markers,
+                          subset.nhoods = da_results$NhoodGroup %in% c('11'), scale=TRUE,
+                          grid.space = "fixed")
+
+plotNhoodExpressionGroups(sce_milo, da_results, features = markers, scale=TRUE,
+                          subset.nhoods = NULL, cluster_features = TRUE,
+                          grid.space = "fixed")
 
 
 
