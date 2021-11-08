@@ -69,7 +69,10 @@ metadata_file <- paste(MetaDirectory, "sample.details.csv", sep = "/")
 sample_details <- read_csv(metadata_file)
 sample_details
 # keep only baseline sample
-samples_to_keep <- sample_details %>% dplyr::filter(Timepoint == "Baseline")
+samples_to_keep <- sample_details %>% dplyr::filter(Group == "exp")
+samples_to_keep <- samples_to_keep %>% arrange(MRN) %>% add_count(MRN) %>% 
+  dplyr::filter(n > 1) %>% slice(- c(3, 6)) %>% 
+  select(-n) %>% add_count(MRN)
 
 
 # prepData for CATALYST - create SCE
@@ -79,36 +82,36 @@ CSVfiles <- samples_to_keep$Filename
 csvTofcs <- function(file.names, dest){
   # create an empty list to start
   DataList <- list()
-
+  
   for(file in file.names){
     tmp <- read_csv(file.path(file))
     file <- gsub(".csv", "", file)
     DataList[[file]] <- tmp
   }
   rm(tmp)
-
+  
   filenames <- names(DataList)
   head(DataList)
-
+  
   # convert csv to fcs
-
+  
   for(i in c(1:length(filenames))){
     data_subset <- DataList[i]
     data_subset <- data.table::rbindlist(as.list(data_subset))
     file_name <- names(DataList)[i]
-
+    
     metadata <- data.frame(name = dimnames(data_subset)[[2]], desc = "")
-
+    
     # create FCS file metadata
     # metadata$range <- apply(apply(data_subset, 2, range), 2, diff)
     metadata$minRange <- apply(data_subset, 2, min)
     metadata$maxRange <- apply(data_subset, 2, max)
-
-
+    
+    
     # data as matrix by exprs
     data_subset.ff <- new("flowFrame", exprs = as.matrix(data_subset),
                           parameters = AnnotatedDataFrame(metadata))
-
+    
     head(data_subset.ff)
     write.FCS(data_subset.ff, paste0(dest, "/", file_name, ".fcs"), what = "numeric")
   }
@@ -125,6 +128,7 @@ fcsFiles <- fcsFiles[fcsFiles %in% fcs_to_keep]
 fs <- read.flowSet(files = fcsFiles, path = fcsDir, truncate_max_range = FALSE)
 fs
 fs[[1]]@description$`$CYT` <- "FACS"
+fs[[1]]@description$`$CYT`
 
 ############ create sample_md & panel_md - CATALYST constructor ################
 # create tibble sample_md
@@ -132,7 +136,7 @@ sample_md <- samples_to_keep %>% select(Filename, Sample, Timepoint, Group) %>%
   mutate(Filename = gsub(".csv", "", Filename)) %>%
   mutate(file_name = paste0(Filename, ".fcs")) %>%
   mutate(patient_id = Sample) %>%
-  mutate(condition = Group) %>%
+  mutate(condition = Timepoint) %>%
   mutate(sample_id = paste(Sample, Timepoint, sep = "_")) %>%
   select(file_name, patient_id, condition, sample_id) %>%
   as.data.frame()
@@ -176,11 +180,11 @@ subsampleSCE <- function(x, n_cells){
   return(x)
 }
 
-cells <- min(c(3000, n_events))
+cells <- min(c(2000, n_events))
 sub.sce <- subsampleSCE(sce, cells)
 logcounts(sub.sce) <- log(counts(sub.sce) + 1)
 
-sub.sce <- runPCA(sub.sce, ncomponents = 30)
+sub.sce <- runPCA(sub.sce, ncomponents = 15)
 sub.sce <- runUMAP(sub.sce, dimred = "PCA", name = "umap")
 
 plotReducedDim(sub.sce, colour_by = "condition", dimred = "umap")
@@ -189,11 +193,11 @@ sce_milo <- Milo(sub.sce)
 sce_milo
 
 # construct kNN graph
-sce_milo <- buildGraph(sce_milo, k = 30, d = 30, reduced.dim = "PCA")
+sce_milo <- buildGraph(sce_milo, k = 30, d = 15, reduced.dim = "PCA")
 sce_milo
 
 # defining representative nhoods on the kNN graph
-sce_milo <- makeNhoods(sce_milo, prop = 0.1, k = 30, d = 30, refined = TRUE, 
+sce_milo <- makeNhoods(sce_milo, prop = 0.1, k = 30, d = 15, refined = TRUE, 
                        reduced_dims = "PCA")
 plotNhoodSizeHist(sce_milo)
 
@@ -210,7 +214,7 @@ rownames(sce_design) <- sce_design$sample_id
 sce_design
 
 # computing nhood connectivity
-sce_milo <- calcNhoodDistance(sce_milo, d = 30, reduced.dim = "PCA")
+sce_milo <- calcNhoodDistance(sce_milo, d = 15, reduced.dim = "PCA")
 sce_milo
 
 # testing
