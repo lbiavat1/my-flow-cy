@@ -10,6 +10,7 @@ Spectre::package.load()
 library(tidyverse)
 library(purrr)
 library(CATALYST)
+library(diffcyt)
 library(tidySingleCellExperiment)
 library(flowCore)
 library(stringr)
@@ -73,14 +74,14 @@ sample_details
 
 # prepData for CATALYST - create SCE
 CSVfiles <- sample_details$Filename
-# keep only baseline sample
+# keep only baseline sample - AML only!!
 samples_to_keep <- sample_details %>% 
+  dplyr::filter(Disease == "AML") %>%
   dplyr::filter(Timepoint == "Baseline") %>%
   dplyr::filter(!grepl("no_harvest", Group)) %>%
   mutate(pt_id = match(MRN, unique(MRN))) %>%
   mutate(patient_id = paste("PT", pt_id, sep = "_")) %>%
-  arrange(pt_id) %>%
-  slice(-c(16, 14))
+  arrange(pt_id)
 samples_to_keep
 as.data.frame(samples_to_keep) %>% select(Filename, Sample, Timepoint, Group, pt_id)
 table(samples_to_keep$Group)
@@ -144,12 +145,12 @@ sample_metadata <- samples_to_keep %>% select(Filename, Sample, Timepoint, Group
   mutate(condition = Group) %>%
   mutate(sample_id = paste(patient_id, Group, sep = "_")) %>%
   select(file_name, Sample, Timepoint, Group, MRN, patient_id, condition, sample_id) %>%
-  write_csv("sample_metadata_ExpVsNExp.csv")
+  write_csv("sample_metadata_AMLExpVsNExp.csv")
 sample_metadata
 deID_key <- sample_metadata %>%
   select(MRN, patient_id) %>%
   distinct() %>%
-  write_csv("deID_key_ExpVsNExp.csv")
+  write_csv("deID_key_AMLExpVsNExp.csv")
 
 sample_md <- sample_metadata %>%
   select(file_name, patient_id, condition, sample_id) %>%
@@ -159,15 +160,15 @@ sample_md
 
 
 
-# create tibble sample_md
-sample_md <- samples_to_keep %>% select(Filename, Sample, Timepoint, Group) %>%
-  mutate(Filename = gsub(".csv", "", Filename)) %>%
-  mutate(file_name = paste0(Filename, ".fcs")) %>%
-  mutate(patient_id = Sample) %>%
-  mutate(condition = Group) %>%
-  mutate(sample_id = paste(Sample, Timepoint, sep = "_")) %>%
-  select(file_name, patient_id, condition, sample_id) %>%
-  as.data.frame()
+# # create tibble sample_md
+# sample_md <- samples_to_keep %>% select(Filename, Sample, Timepoint, Group) %>%
+#   mutate(Filename = gsub(".csv", "", Filename)) %>%
+#   mutate(file_name = paste0(Filename, ".fcs")) %>%
+#   mutate(patient_id = Sample) %>%
+#   mutate(condition = Group) %>%
+#   mutate(sample_id = paste(Sample, Timepoint, sep = "_")) %>%
+#   select(file_name, patient_id, condition, sample_id) %>%
+#   as.data.frame()
 
 # create tibble panel_md
 fcs_colname <- colnames(fs)
@@ -196,10 +197,47 @@ n_cells(sce)
 plotCounts(sce, group_by = "sample_id", color_by = "condition")
 
 plotNRS(sce, features = type_markers(sce), color_by = "condition")
+pbMDS(sce, features = type_markers(sce), color_by = "condition")
 
 ########### run std analysis workflow ########################################
 std_sce <- sce
+std_sce <- cluster(std_sce, features = "type", xdim = 10, ydim = 10, maxK = 20, verbose = TRUE,
+                   seed = 1)
+std_sce <- runDR(std_sce, dr = "UMAP", cells = 2000, features = "type", assay = "exprs")
+delta_area(std_sce)
+plotAbundances(std_sce, k = "meta6", by = "cluster_id", group_by = "condition")
+plotDR(std_sce, dr = "UMAP", color_by = "meta8", facet_by = "condition") +
+  geom_density2d(binwidth = 0.006, colour = "black")
 
+annotation_table <- as.data.frame(cbind(c(1:8), c(1:8)))
+colnames(annotation_table) <- c("meta8", "Clusters")
+annotation_table$Clusters <- factor(annotation_table$Clusters)
+std_sce <- mergeClusters(std_sce, k = "meta8", 
+                     table = annotation_table, id = "cluster_annotation", overwrite = TRUE)
+std_sce$cluster_annotation <- cluster_ids(std_sce, "cluster_annotation")
+
+FDR_cutoff <- 0.05
+ei <- std_sce@metadata$experiment_info
+plotAbundances(std_sce, k = "cluster_annotation", by = "cluster_id", group_by = "condition")
+plotExprHeatmap(std_sce, features = type_markers(std_sce), k = "cluster_annotation", 
+                by = "cluster_id", scale = "last", bars = TRUE, perc = TRUE)
+
+# DA using edgeR
+design <- createDesignMatrix(ei,
+                             cols_design = c("condition"))
+contrast <- createContrast(c(0, 1))
+
+nrow(contrast) == ncol(design)
+
+out_DA <- diffcyt(std_sce,
+                  experiment_info = ei, design = design, contrast = contrast,
+                  analysis_type = "DA", method_DA = "diffcyt-DA-edgeR",
+                  clustering_to_use = "cluster_annotation", verbose = TRUE, subsampling = TRUE,
+                  transform = FALSE, normalize = FALSE, min_cells = 3, min_samples = 1)
+
+da <- rowData(out_DA$res)
+plotDiffHeatmap(std_sce, da, top_n = 8, all = TRUE, fdr = FDR_cutoff)
+CATALYST::pbMDS(std_sce, color_by = "condition", features = type_markers(sce), fun = "median")
 
 ######### prep to run miloR - subsample SCE per sample_id ######################
 
@@ -215,20 +253,21 @@ cells <- min(c(3000, n_events))
 sub.sce <- subsampleSCE(sce, cells)
 logcounts(sub.sce) <- log(counts(sub.sce) + 1)
 
-sub.sce <- runPCA(sub.sce, ncomponents = 30)
+sub.sce <- runPCA(sub.sce, ncomponents = 15)
 sub.sce <- runUMAP(sub.sce, dimred = "PCA", name = "umap")
 
 plotReducedDim(sub.sce, colour_by = "condition", dimred = "umap")
+plotReducedDim(sub.sce, colour_by = "condition", dimred = "PCA", ncomponents = 3)
 
 sce_milo <- Milo(sub.sce)
 sce_milo
 
 # construct kNN graph
-sce_milo <- buildGraph(sce_milo, k = 30, d = 30, reduced.dim = "PCA")
+sce_milo <- buildGraph(sce_milo, k = 30, d = 15, reduced.dim = "PCA")
 sce_milo
 
 # defining representative nhoods on the kNN graph
-sce_milo <- makeNhoods(sce_milo, prop = 0.1, k = 30, d = 30, refined = TRUE, 
+sce_milo <- makeNhoods(sce_milo, prop = 0.1, k = 30, d = 15, refined = TRUE, 
                        reduced_dims = "PCA")
 plotNhoodSizeHist(sce_milo)
 
@@ -245,7 +284,7 @@ rownames(sce_design) <- sce_design$sample_id
 sce_design
 
 # computing nhood connectivity
-sce_milo <- calcNhoodDistance(sce_milo, d = 30, reduced.dim = "PCA")
+sce_milo <- calcNhoodDistance(sce_milo, d = 15, reduced.dim = "PCA")
 sce_milo
 
 # testing
@@ -274,7 +313,7 @@ nh_graph_plot <- plotNhoodGraphDA(sce_milo, da_results, layout = "umap", alpha =
 umap_plot + nh_graph_plot +
   plot_layout(guides = "collect")
 setwd(OutputDirectory)
-ggsave("miloPlot.pdf")
+ggsave("miloPlot_AMLonly.pdf")
 
 da_results <- annotateNhoods(sce_milo, da_results, coldata_col = "condition")
 head(da_results)
