@@ -14,6 +14,7 @@ library(tidySingleCellExperiment)
 library(flowCore)
 library(stringr)
 library(scater)
+library(CytoTree)
 
 library(miloR)
 library(patchwork)
@@ -68,13 +69,13 @@ Filename <- list.files(InputDirectory)
 metadata_file <- paste(MetaDirectory, "sample.details.csv", sep = "/")
 sample_details <- read_csv(metadata_file)
 sample_details
-# keep only baseline sample
-samples_to_keep <- sample_details %>% dplyr::filter(Timepoint == "Baseline")
+
 
 
 # prepData for CATALYST - create SCE
-CSVfiles <- samples_to_keep$Filename
-
+CSVfiles <- sample_details$Filename
+# keep only baseline sample
+samples_to_keep <- sample_details %>% dplyr::filter(Timepoint == "Baseline")
 ######################### convert csv files to fcs #############################
 csvTofcs <- function(file.names, dest){
   # create an empty list to start
