@@ -68,11 +68,16 @@ Filename <- list.files(InputDirectory)
 metadata_file <- paste(MetaDirectory, "sample.details.csv", sep = "/")
 sample_details <- read_csv(metadata_file)
 sample_details
-# keep only baseline sample
+# keep only first infusion pre/post pairs
 samples_to_keep <- sample_details %>% dplyr::filter(Group == "exp")
 samples_to_keep <- samples_to_keep %>% arrange(MRN) %>% add_count(MRN) %>% 
-  dplyr::filter(n > 1) %>% slice(- c(3, 6)) %>% 
-  select(-n) %>% add_count(MRN)
+  dplyr::filter(n > 1) %>% 
+  arrange(desc(n)) %>%
+  slice(- c(3, 6, 9 , 10, 13, 17)) %>% 
+  select(-n) %>% add_count(MRN) %>%
+  mutate(pair = (n == 2))
+
+all(samples_to_keep$pair == TRUE)
 
 
 # prepData for CATALYST - create SCE
@@ -125,21 +130,33 @@ fcsFiles <- list.files(path = fcsDir, pattern = ".fcs")
 length(fcsFiles)
 fcs_to_keep <- sapply(samples_to_keep$Filename, simplify = TRUE, function(.) gsub(".csv", ".fcs", .))
 fcsFiles <- fcsFiles[fcsFiles %in% fcs_to_keep]
+fcsFiles
 fs <- read.flowSet(files = fcsFiles, path = fcsDir, truncate_max_range = FALSE)
 fs
 fs[[1]]@description$`$CYT` <- "FACS"
 fs[[1]]@description$`$CYT`
 
 ############ create sample_md & panel_md - CATALYST constructor ################
-# create tibble sample_md
-sample_md <- samples_to_keep %>% select(Filename, Sample, Timepoint, Group) %>%
+# create tibble sample_md - assign real patient_id to pair samples!
+sample_metadata <- samples_to_keep %>% select(Filename, Sample, Timepoint, Group, MRN) %>%
   mutate(Filename = gsub(".csv", "", Filename)) %>%
   mutate(file_name = paste0(Filename, ".fcs")) %>%
-  mutate(patient_id = Sample) %>%
+  mutate(pt_id = match(MRN, unique(MRN))) %>%
+  mutate(patient_id = paste("PT", pt_id, sep = "_")) %>%
   mutate(condition = Timepoint) %>%
-  mutate(sample_id = paste(Sample, Timepoint, sep = "_")) %>%
+  mutate(sample_id = paste(patient_id, Timepoint, sep = "_")) %>%
+  select(file_name, Sample, Timepoint, Group, MRN, patient_id, condition, sample_id) %>%
+  write_csv("sample_metadata.csv")
+sample_metadata
+deID_key <- sample_metadata %>%
+  select(MRN, patient_id) %>%
+  distinct() %>%
+  write_csv("deID_key.csv")
+
+sample_md <- sample_metadata %>%
   select(file_name, patient_id, condition, sample_id) %>%
   as.data.frame()
+sample_md
 
 # create tibble panel_md
 fcs_colname <- colnames(fs)
@@ -168,6 +185,12 @@ n_cells(sce)
 plotCounts(sce, group_by = "sample_id", color_by = "condition")
 
 plotNRS(sce, features = type_markers(sce), color_by = "condition")
+
+std_sce <- sce
+std_sce <- cluster(std_sce, features = "type", xdim = 10, ydim = 10, maxK = 20, verbose = TRUE)
+delta_area(std_sce)
+std_sce <- runDR(std_sce, dr = "UMAP", cells = 2000, features = "type", assay = "exprs")
+plotAbundances(std_sce, k = "meta8", by = "cluster_id", group_by = "condition")
 
 
 ######### prep to run miloR - subsample SCE per sample_id ######################
@@ -206,7 +229,7 @@ sce_milo <- countCells(sce_milo, meta.data = data.frame(colData(sce_milo)), samp
 head(nhoodCounts(sce_milo))
 
 # defining experimental design
-sce_design <- data.frame(colData(sce_milo))[,c("sample_id", "condition")]
+sce_design <- data.frame(colData(sce_milo))[,c("sample_id", "condition", "patient_id")]
 ## Convert batch info from integer to factor
 sce_design$condition <- as.factor(sce_design$condition)
 sce_design <- distinct(sce_design)
@@ -218,7 +241,7 @@ sce_milo <- calcNhoodDistance(sce_milo, d = 15, reduced.dim = "PCA")
 sce_milo
 
 # testing
-da_results <- testNhoods(sce_milo, design = ~condition, 
+da_results <- testNhoods(sce_milo, design = ~patient_id + condition, 
                          design.df = sce_design)
 da_results %>%
   arrange(SpatialFDR) %>%
