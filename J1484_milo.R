@@ -14,7 +14,6 @@ library(tidySingleCellExperiment)
 library(flowCore)
 library(stringr)
 library(scater)
-library(CytoTree)
 
 library(miloR)
 library(patchwork)
@@ -75,7 +74,16 @@ sample_details
 # prepData for CATALYST - create SCE
 CSVfiles <- sample_details$Filename
 # keep only baseline sample
-samples_to_keep <- sample_details %>% dplyr::filter(Timepoint == "Baseline")
+samples_to_keep <- sample_details %>% 
+  dplyr::filter(Timepoint == "Baseline") %>%
+  dplyr::filter(!grepl("no_harvest", Group)) %>%
+  mutate(pt_id = match(MRN, unique(MRN))) %>%
+  mutate(patient_id = paste("PT", pt_id, sep = "_")) %>%
+  arrange(pt_id) %>%
+  slice(-c(16, 14))
+samples_to_keep
+as.data.frame(samples_to_keep) %>% select(Filename, Sample, Timepoint, Group, pt_id)
+table(samples_to_keep$Group)
 ######################### convert csv files to fcs #############################
 csvTofcs <- function(file.names, dest){
   # create an empty list to start
@@ -128,6 +136,29 @@ fs
 fs[[1]]@description$`$CYT` <- "FACS"
 
 ############ create sample_md & panel_md - CATALYST constructor ################
+sample_metadata <- samples_to_keep %>% select(Filename, Sample, Timepoint, Group, MRN) %>%
+  mutate(Filename = gsub(".csv", "", Filename)) %>%
+  mutate(file_name = paste0(Filename, ".fcs")) %>%
+  mutate(pt_id = match(MRN, unique(MRN))) %>%
+  mutate(patient_id = paste("PT", pt_id, sep = "_")) %>%
+  mutate(condition = Group) %>%
+  mutate(sample_id = paste(patient_id, Group, sep = "_")) %>%
+  select(file_name, Sample, Timepoint, Group, MRN, patient_id, condition, sample_id) %>%
+  write_csv("sample_metadata_ExpVsNExp.csv")
+sample_metadata
+deID_key <- sample_metadata %>%
+  select(MRN, patient_id) %>%
+  distinct() %>%
+  write_csv("deID_key_ExpVsNExp.csv")
+
+sample_md <- sample_metadata %>%
+  select(file_name, patient_id, condition, sample_id) %>%
+  as.data.frame()
+sample_md
+
+
+
+
 # create tibble sample_md
 sample_md <- samples_to_keep %>% select(Filename, Sample, Timepoint, Group) %>%
   mutate(Filename = gsub(".csv", "", Filename)) %>%
@@ -165,6 +196,9 @@ n_cells(sce)
 plotCounts(sce, group_by = "sample_id", color_by = "condition")
 
 plotNRS(sce, features = type_markers(sce), color_by = "condition")
+
+########### run std analysis workflow ########################################
+std_sce <- sce
 
 
 ######### prep to run miloR - subsample SCE per sample_id ######################
