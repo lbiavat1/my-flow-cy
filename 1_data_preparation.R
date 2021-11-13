@@ -73,45 +73,45 @@ samples_to_keep <- sample_details %>% dplyr::filter(Timepoint == "Baseline")
 CSVfiles <- samples_to_keep$Filename
 
 # convert csv files to fcs
-csvTofcs <- function(file.names, dest){
-  # create an empty list to start
-  DataList <- list() 
-  
-  for(file in file.names){
-    tmp <- read_csv(file.path(file))
-    file <- gsub(".csv", "", file)
-    DataList[[file]] <- tmp
-  }
-  rm(tmp)
-  
-  filenames <- names(DataList)
-  head(DataList)
-  
-  # convert csv to fcs
-  
-  for(i in c(1:length(filenames))){
-    data_subset <- DataList[i]
-    data_subset <- data.table::rbindlist(as.list(data_subset))
-    file_name <- names(DataList)[i]
-    
-    metadata <- data.frame(name = dimnames(data_subset)[[2]], desc = "")
-    
-    # create FCS file metadata
-    # metadata$range <- apply(apply(data_subset, 2, range), 2, diff)
-    metadata$minRange <- apply(data_subset, 2, min)
-    metadata$maxRange <- apply(data_subset, 2, max)
-    
-    
-    # data as matrix by exprs
-    data_subset.ff <- new("flowFrame", exprs = as.matrix(data_subset),
-                          parameters = AnnotatedDataFrame(metadata))
-    
-    head(data_subset.ff)
-    write.FCS(data_subset.ff, paste0(dest, "/", file_name, ".fcs"), what = "numeric")
-  }
-}
-setwd(InputDirectory)
-csvTofcs(CSVfiles, fcsDir)
+# csvTofcs <- function(file.names, dest){
+#   # create an empty list to start
+#   DataList <- list() 
+#   
+#   for(file in file.names){
+#     tmp <- read_csv(file.path(file))
+#     file <- gsub(".csv", "", file)
+#     DataList[[file]] <- tmp
+#   }
+#   rm(tmp)
+#   
+#   filenames <- names(DataList)
+#   head(DataList)
+#   
+#   # convert csv to fcs
+#   
+#   for(i in c(1:length(filenames))){
+#     data_subset <- DataList[i]
+#     data_subset <- data.table::rbindlist(as.list(data_subset))
+#     file_name <- names(DataList)[i]
+#     
+#     metadata <- data.frame(name = dimnames(data_subset)[[2]], desc = "")
+#     
+#     # create FCS file metadata
+#     # metadata$range <- apply(apply(data_subset, 2, range), 2, diff)
+#     metadata$minRange <- apply(data_subset, 2, min)
+#     metadata$maxRange <- apply(data_subset, 2, max)
+#     
+#     
+#     # data as matrix by exprs
+#     data_subset.ff <- new("flowFrame", exprs = as.matrix(data_subset),
+#                           parameters = AnnotatedDataFrame(metadata))
+#     
+#     head(data_subset.ff)
+#     write.FCS(data_subset.ff, paste0(dest, "/", file_name, ".fcs"), what = "numeric")
+#   }
+# }
+# setwd(InputDirectory)
+# csvTofcs(CSVfiles, fcsDir)
 fcsFiles <- list.files(path = fcsDir, pattern = ".fcs")
 # read fcs files as flowSet and add $CYT keyword
 fs <- read.flowSet(files = fcsFiles, path = fcsDir, truncate_max_range = FALSE)
@@ -146,11 +146,17 @@ as.data.frame(panel_md)
 sce <- prepData(fs, panel_md, sample_md)
 assay(sce, "exprs") <- assay(sce, "counts")
 
-tidy_sce <- tidySingleCellExperiment::tidy(sce)
+subsetSCE <- function(x, n_cells){
+  cs <- split(seq_len(ncol(x)), x$sample_id)
+  cs <- unlist(lapply(cs, function(.) sample(., min(n_cells, length(.)))))
+  x <- x[, cs]
+  return(x)
+}
 
-pbMDS(sce, by = "sample_id")
-sce <- runDR(sce, dr = "PCA", features = "type")
-plotDR(sce, dr = "PCA", color_by = "condition")
+sub_sce <- subsetSCE(sce, 1000)
+
+
+pbMDS(sub_sce, by = "sample_id")
 
 spectre_sce <- create.dt(sce)
 

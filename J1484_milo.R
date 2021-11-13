@@ -14,6 +14,8 @@ library(tidySingleCellExperiment)
 library(flowCore)
 library(stringr)
 library(scater)
+library(scran)
+
 
 library(miloR)
 library(patchwork)
@@ -68,6 +70,9 @@ Filename <- list.files(InputDirectory)
 metadata_file <- paste(MetaDirectory, "sample.details.csv", sep = "/")
 sample_details <- read_csv(metadata_file)
 sample_details
+# keep only baseline sample
+samples_to_keep <- sample_details %>% dplyr::filter(Timepoint == "Baseline") %>%
+  dplyr::filter(!grepl("no_harvest", Group))
 
 
 
@@ -183,23 +188,20 @@ panel_md <- as_tibble(cbind(fcs_colname, antigen, fluorochrome, marker_class))
 as.data.frame(panel_md)
 
 ######### prepData - create SCE using CATALYST #################################
+
 sce <- prepData(fs, panel_md, sample_md, FACS = TRUE)
 assay(sce, "exprs") <- assay(sce, "counts")
-
-# p <- plotExprs(sce, features = NULL, color_by = "condition")
-# p$facet$params$ncol <- 9
-# p
 
 n_events <- min(n_cells(sce))
 n_events
 n_cells(sce)
 plotCounts(sce, group_by = "sample_id", color_by = "condition")
 
+
 plotNRS(sce, features = type_markers(sce), color_by = "condition")
 
 ########### run std analysis workflow ########################################
 std_sce <- sce
-
 
 ######### prep to run miloR - subsample SCE per sample_id ######################
 
@@ -213,9 +215,33 @@ subsampleSCE <- function(x, n_cells){
 
 cells <- min(c(3000, n_events))
 sub.sce <- subsampleSCE(sce, cells)
+
+
+# std.sce <- sub.sce
+# seed <- 123456
+# set.seed(seed)
+# std.sce <- cluster(std.sce, features = "type", xdim = 10, ydim = 10, maxK = 20, 
+#                verbose = TRUE, seed = seed)
+# delta_area(std.sce)
+# # Run dimensionality reduction
+# 
+# std.sce <- runDR(std.sce, dr =  "UMAP", features = "type")
+# 
+# plotAbundances(std.sce, k = "meta8", by = "cluster_id", group_by = "condition")
+# plotDR(std.sce, dr = "UMAP", color_by = "meta8", facet_by = "condition") +
+#   geom_density2d(binwidth = 0.006, colour = "black")
+# 
+# plotExprHeatmap(std.sce, features = type_markers(sce), k = "meta8", 
+#                 by = "cluster_id", scale = "last", bars = TRUE, perc = TRUE)
+# 
+# 
 logcounts(sub.sce) <- log(counts(sub.sce) + 1)
 
-sub.sce <- runPCA(sub.sce, ncomponents = 30)
+sub.sce <- runPCA(sub.sce, ncomponents = 15)
+percent.var <- attr(reducedDim(sub.sce), "percentVar")
+plot(percent.var, log = "y", xlab = "PC", ylab = "Variance explained (%)")
+plotReducedDim(sub.sce, colour_by = "condition", dimred = "PCA")
+
 sub.sce <- runUMAP(sub.sce, dimred = "PCA", name = "umap")
 
 plotReducedDim(sub.sce, colour_by = "condition", dimred = "umap")
@@ -224,11 +250,11 @@ sce_milo <- Milo(sub.sce)
 sce_milo
 
 # construct kNN graph
-sce_milo <- buildGraph(sce_milo, k = 30, d = 30, reduced.dim = "PCA")
+sce_milo <- buildGraph(sce_milo, k = 30, d = 15, reduced.dim = "PCA")
 sce_milo
 
 # defining representative nhoods on the kNN graph
-sce_milo <- makeNhoods(sce_milo, prop = 0.1, k = 30, d = 30, refined = TRUE, 
+sce_milo <- makeNhoods(sce_milo, prop = 0.1, k = 30, d = 15, refined = TRUE, 
                        reduced_dims = "PCA")
 plotNhoodSizeHist(sce_milo)
 
@@ -237,7 +263,7 @@ sce_milo <- countCells(sce_milo, meta.data = data.frame(colData(sce_milo)), samp
 head(nhoodCounts(sce_milo))
 
 # defining experimental design
-sce_design <- data.frame(colData(sce_milo))[,c("sample_id", "condition")]
+sce_design <- data.frame(colData(sce_milo))[, c("sample_id", "condition")]
 ## Convert batch info from integer to factor
 sce_design$condition <- as.factor(sce_design$condition)
 sce_design <- distinct(sce_design)
@@ -245,7 +271,7 @@ rownames(sce_design) <- sce_design$sample_id
 sce_design
 
 # computing nhood connectivity
-sce_milo <- calcNhoodDistance(sce_milo, d = 30, reduced.dim = "PCA")
+sce_milo <- calcNhoodDistance(sce_milo, d = 15, reduced.dim = "PCA")
 sce_milo
 
 # testing
@@ -276,29 +302,70 @@ umap_plot + nh_graph_plot +
 setwd(OutputDirectory)
 ggsave("miloPlot.pdf")
 
+
+# assign a "condition" label to each nhood by finding the most abundant "condition" within cells in each neighbourhood. 
 da_results <- annotateNhoods(sce_milo, da_results, coldata_col = "condition")
 head(da_results)
+ggplot(da_results, aes(condition_fraction)) +
+  geom_histogram(bins=50)
 
+# define a threshold for condition_fraction to exclude nhoods that are a mix of cell types.
 da_results$condition <- ifelse(da_results$condition_fraction < 0.7, "Mixed", da_results$condition)
 
 plotDAbeeswarm(da_results, group.by = "condition")
 
+# add log-normalized counts to milo object
 sce_milo <- logNormCounts(sce_milo)
 
-# da_results$NhoodGroup <- as.numeric(da_results$SpatialFDR < 0.1 & da_results$logFC < 0)
-# as_tibble(da_results)
-# da_nhood_markers <- findNhoodGroupMarkers(sce_milo, da_results, 
-#                                           subset.row = rownames(sce_milo)[c(11,13:32)],
-#                                           aggregate.samples = TRUE, sample_col = "sample_id")
+da_results <- groupNhoods(sce_milo, da.res = da_results, da.fdr = 0.1, max.lfc.delta = 2)
+as_tibble(da_results)
 
-## Run buildNhoodGraph to store nhood adjacency matrix
-sce_milo <- buildNhoodGraph(sce_milo)
 
-## Find groups
-da_results <- groupNhoods(sce_milo, da_results, max.lfc.delta = 2)
-head(da_results)
+type.markers <- rownames(sce_milo)[c(11, 13:32)]
+cellID <- sce_milo %>% select(cell)
+colnames(sce_milo) <- c(1:69000)
+da_nhood_markers <- findNhoodGroupMarkers(sce_milo, da_results, subset.row = type.markers)
 
-plotNhoodGroups(sce_milo, da_results, layout="umap")
-plotDAbeeswarm(da_results, "NhoodGroup")
+plotNhoodGroups(sce_milo, da_results, layout = "umap")
+plotDAbeeswarm(da_results, group.by = "NhoodGroup")
+
+plotDAbeeswarm(groupNhoods(sce_milo, da_results, max.lfc.delta = 1),
+               group.by = "NhoodGroup") + 
+  ggtitle("max LFC delta = 1")
+
+plotDAbeeswarm(groupNhoods(sce_milo, da_results, da.fdr = 0.1, max.lfc.delta = 2, overlap = 1), 
+               group.by = "NhoodGroup") + ggtitle("overlap = 1")
+
+## Exclude zero counts genes
+keep.rows <- rowSums(logcounts(sce_milo)) != 0
+sce_milo <- sce_milo[keep.rows, ]
+
+## Find HVGs
+dec <- modelGeneVar(sce_milo, subset.row = type.markers)
+hvgs <- getTopHVGs(dec, n = NULL)
+head(hvgs)
+
+nhood_markers <- findNhoodGroupMarkers(sce_milo, da_results, subset.row = hvgs)
+
+head(nhood_markers)
+
+gr11_markers <- nhood_markers[c("logFC_11", "adj.P.Val_11")] 
+colnames(gr11_markers) <- c("logFC", "adj.P.Val")
+
+head(gr11_markers[order(gr11_markers$adj.P.Val), ])
+
+markers <- rownames(nhood_markers)[nhood_markers$adj.P.Val_11 < 0.01 & nhood_markers$logFC_11 > 0]
+
+plotNhoodExpressionGroups(sce_milo, da_results, features = markers,
+                          subset.nhoods = da_results$NhoodGroup %in% c('11'), scale=TRUE,
+                          grid.space = "fixed")
+
+plotNhoodExpressionGroups(sce_milo, da_results, features = markers, scale=TRUE,
+                          subset.nhoods = NULL, cluster_features = TRUE,
+                          grid.space = "fixed")
+
+
+
+
 
 
