@@ -81,12 +81,13 @@ samples_to_keep <- sample_details %>% dplyr::filter(Timepoint == "Baseline") %>%
 CSVfiles <- sample_details$Filename
 # keep only baseline sample - AML only!!
 samples_to_keep <- sample_details %>% 
-  dplyr::filter(Disease == "AML") %>%
+  dplyr::filter(!grepl("CL", Disease)) %>%
   dplyr::filter(Timepoint == "Baseline") %>%
   dplyr::filter(!grepl("no_harvest", Group)) %>%
   mutate(pt_id = match(MRN, unique(MRN))) %>%
   mutate(patient_id = paste("PT", pt_id, sep = "_")) %>%
-  arrange(pt_id)
+  arrange(pt_id) %>%
+  slice(-c(12))
 samples_to_keep
 as.data.frame(samples_to_keep) %>% select(Filename, Sample, Timepoint, Group, pt_id)
 table(samples_to_keep$Group)
@@ -142,6 +143,7 @@ fs
 fs[[1]]@description$`$CYT` <- "FACS"
 
 ############ create sample_md & panel_md - CATALYST constructor ################
+setwd(MetaDirectory)
 sample_metadata <- samples_to_keep %>% select(Filename, Sample, Timepoint, Group, MRN) %>%
   mutate(Filename = gsub(".csv", "", Filename)) %>%
   mutate(file_name = paste0(Filename, ".fcs")) %>%
@@ -150,12 +152,12 @@ sample_metadata <- samples_to_keep %>% select(Filename, Sample, Timepoint, Group
   mutate(condition = Group) %>%
   mutate(sample_id = paste(patient_id, Group, sep = "_")) %>%
   select(file_name, Sample, Timepoint, Group, MRN, patient_id, condition, sample_id) %>%
-  write_csv("sample_metadata_AMLExpVsNExp.csv")
+  write_csv("sample_metadata_AMLMMExpVsNExp.csv")
 sample_metadata
 deID_key <- sample_metadata %>%
   select(MRN, patient_id) %>%
   distinct() %>%
-  write_csv("deID_key_AMLExpVsNExp.csv")
+  write_csv("deID_key_AMLMMExpVsNExp.csv")
 
 sample_md <- sample_metadata %>%
   select(file_name, patient_id, condition, sample_id) %>%
@@ -189,7 +191,7 @@ panel_md <- as_tibble(cbind(fcs_colname, antigen, fluorochrome, marker_class))
 as.data.frame(panel_md)
 
 ######### prepData - create SCE using CATALYST #################################
-
+setwd(OutputDirectory)
 sce <- prepData(fs, panel_md, sample_md, FACS = TRUE)
 assay(sce, "exprs") <- assay(sce, "counts")
 
@@ -202,6 +204,8 @@ plotCounts(sce, group_by = "sample_id", color_by = "condition")
 plotNRS(sce, features = type_markers(sce), color_by = "condition")
 pbMDS(sce, features = type_markers(sce), color_by = "condition")
 
+# TODO: try Spectre, milo, consider CFA 
+
 ########### run std analysis workflow ########################################
 std_sce <- sce
 
@@ -209,7 +213,7 @@ std_sce <- cluster(std_sce, features = "type", xdim = 10, ydim = 10, maxK = 20, 
                    seed = 1)
 std_sce <- runDR(std_sce, dr = "UMAP", cells = 2000, features = "type", assay = "exprs")
 delta_area(std_sce)
-plotAbundances(std_sce, k = "meta6", by = "cluster_id", group_by = "condition")
+plotAbundances(std_sce, k = "meta8", by = "cluster_id", group_by = "condition")
 plotDR(std_sce, dr = "UMAP", color_by = "meta8", facet_by = "condition") +
   geom_density2d(binwidth = 0.006, colour = "black")
 
@@ -243,6 +247,10 @@ da <- rowData(out_DA$res)
 plotDiffHeatmap(std_sce, da, top_n = 8, all = TRUE, fdr = FDR_cutoff)
 CATALYST::pbMDS(std_sce, color_by = "condition", features = type_markers(sce), fun = "median")
 
+getwd()
+setwd(OutputDirectory)
+getwd()
+saveRDS(std_sce, file = "std_sceMMAML.rds")
 
 ######### prep to run miloR - subsample SCE per sample_id ######################
 
@@ -253,9 +261,16 @@ subsampleSCE <- function(x, n_cells){
   x <- x[, cs]
   return(x)
 }
+subsampleSCE_condition <- function(x, n_cells){
+  cs <- split(seq_len(ncol(x)), x$condition)
+  cs <- unlist(lapply(cs, function(.) sample(., min(n_cells, length(.)))))
+  x <- x[, cs]
+  return(x)
+}
 
 cells <- min(c(3000, n_events))
-sub.sce <- subsampleSCE(sce, cells)
+cells <- 20000
+sub.sce <- subsampleSCE_condition(sce, cells)
 
 
 # std.sce <- sub.sce
@@ -343,7 +358,7 @@ nh_graph_plot <- plotNhoodGraphDA(sce_milo, da_results, layout = "umap", alpha =
 umap_plot + nh_graph_plot +
   plot_layout(guides = "collect")
 setwd(OutputDirectory)
-ggsave("miloPlot_AMLonly.pdf")
+ggsave("miloPlot_AMLMM.pdf")
 
 
 # assign a "condition" label to each nhood by finding the most abundant "condition" within cells in each neighbourhood. 
@@ -406,6 +421,135 @@ plotNhoodExpressionGroups(sce_milo, da_results, features = markers,
 plotNhoodExpressionGroups(sce_milo, da_results, features = markers, scale=TRUE,
                           subset.nhoods = NULL, cluster_features = TRUE,
                           grid.space = "fixed")
+
+
+
+############# Spectre ########################################################
+# import data
+list.files(InputDirectory)
+samples_to_keep$Filename
+
+data.list <- Spectre::read.files(file.loc = InputDirectory, file.type = ".csv", 
+                                 do.embed.file.names = TRUE, header = TRUE)
+check <- do.list.summary(data.list)
+check$name.table
+# subset only baseline samples
+# merge data
+cell.data <- do.merge.files(data.list)
+
+# note: remove unwanted samples (limit analysis to baseline/exp vs non-exp)
+# select only samples from Baseline, exp vs not_exp - remove HD
+file.names <- gsub(".csv", "", samples_to_keep$Filename)
+data <- cell.data %>% dplyr::filter(FileName %in% file.names)
+
+as.matrix(names(cell.data))
+
+# make sample plot
+# make.colour.plot(do.subsample(cell.data, 20000), "Comp-PE-A :: TCF1", "Comp-BV711-A :: CD127")
+
+# add metadata and set parameters
+sample.info <- samples_to_keep %>% select("Filename", "Group")
+
+cell.data <- do.add.cols(data, "FileName", sample.info, "Filename", rmv.ext = TRUE)
+class(cell.data)
+cell.data
+
+as.matrix(names(cell.data))
+# select relevant markers - if needed, subset state vs type markers here
+type.markers <- names(cell.data)[c(11, 13:32)]
+type.markers
+
+# select markers used for clustering/DR
+cluster.markers <- type.markers
+
+# specify sample, group, and batch columns
+exp.name <- "J1484 - aMILs expansion"
+sample.col <- "Sample"
+group.col <- "Group"
+batch.col <- "Batch"
+
+data.frame(table(cell.data[[group.col]]))
+
+unique(cell.data[[group.col]])
+
+# Clustering and DR
+
+setwd(OutputDirectory)
+if(!dir.exists("output-clustering"))
+  dir.create("output-clustering")
+clustering.dir <- "output-clustering"
+setwd(clustering.dir)
+
+# run flowsom
+cell.data <- run.flowsom(cell.data, cluster.markers, meta.k = 12)
+cell.data
+
+# dimrnsionality reduction - DR
+unique(cell.data[[group.col]])
+subsampling.targets <- c(20000, 20000)
+cell.sub <- do.subsample(cell.data, subsampling.targets, group.col)
+
+cell.sub <- run.umap(cell.sub, cluster.markers)
+cell.sub
+
+make.colour.plot(cell.sub, x.axis = "UMAP_X", y.axis = "UMAP_Y", col.axis = "FlowSOM_metacluster", 
+                 col.type = "factor", add.label = TRUE)
+
+make.multi.plot(cell.sub, "UMAP_X", "UMAP_Y", "FlowSOM_metacluster", col.type = 'factor',
+                divide.by = group.col, add.density = TRUE)
+
+RColorBrewer::display.brewer.all()
+
+ggplot(cell.sub, aes(x = UMAP_X, y = UMAP_Y, col = as.factor(FlowSOM_metacluster))) +
+  geom_point(size = 0.1) +
+  facet_wrap(~ Group) +
+  theme_bw()
+
+exp <- do.aggregate(cell.data, type.markers, by = "FlowSOM_metacluster")
+make.pheatmap(exp, "FlowSOM_metacluster", cluster.markers)
+
+setwd(OutputDirectory)
+dir.create("Output - annotation")
+setwd("Output - annotation")
+
+# annotation 
+
+
+setwd(OutputDirectory)
+dir.create("Output - summary data")
+setwd("Output - summary data")
+
+# stats
+
+variance.test <- 'kruskal.test'
+pairwise.test <- "wilcox.test"
+
+as.matrix(unique(cell.data[[group.col]]))
+
+comparisons <- list(c("exp", "not_exp"))
+comparisons
+
+grp.order <- c("exp", "not_exp")
+grp.order
+
+as.matrix(type.markers)
+
+dyn.cols <- type.markers
+dyn.cols
+
+meta.data <- sample_details %>% filter(Filename %in% samples_to_keep$Filename)
+counts <- meta.data[, c(3,9)]
+
+sum.dat <- create.sumtable(dat = cell.data,
+                           sample.col = sample.col,
+                           pop.col = "FlowSOM_metacluster",
+                           use.cols = dyn.cols,
+                           annot.cols = c(group.col),
+                           counts = NULL)
+sum.dat
+
+
+
 
 
 
